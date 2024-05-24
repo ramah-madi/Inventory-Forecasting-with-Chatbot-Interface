@@ -13,6 +13,11 @@ from statsmodels.tsa.stattools import acf
 
 app = FastAPI()
 
+# welcoming main route for test 
+@app.get("/")
+def hello():
+    return {"messege" : "Hello to forecat api"} 
+
 # Statistical Models
 @app.post("/api/statsForecast/")
 async def forecast(file: UploadFile = File(...), start: str = Form(...), end: str = Form(...), date_column: str = Form(...), target_column: str = Form(...)):
