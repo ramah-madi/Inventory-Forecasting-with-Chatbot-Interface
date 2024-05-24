@@ -10,7 +10,7 @@ distro==1.4.0
 dnspython==2.6.1
 email-validator==2.1.1
 exceptiongroup==1.2.1
-fastapi==0.111.0
+fastapi
 fastapi-cli==0.0.4
 filelock==3.14.0
 h11==0.14.0
