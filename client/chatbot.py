@@ -56,7 +56,7 @@ def ml_forecast(data_file, start, end, date_column, target_column):
         'date_column': date_column,
         'target_column': target_column
     }
-    response = requests.post('http://localhost:8000/api/mlForecast/', files=files, data=data)
+    response = requests.post('https://server-api-dok7.onrender.com/api/mlForecast/', files=files, data=data)
     return response.json()
 
 # Function to interact with the Stats forecast API
@@ -68,7 +68,7 @@ def stats_forecast(data_file, start, end, date_column, target_column):
         'date_column': date_column,
         'target_column': target_column
     }
-    response = requests.post('http://localhost:8000/api/statsForecast/', files=files, data=data)
+    response = requests.post('https://server-api-dok7.onrender.com/api/statsForecast/', files=files, data=data)
 
     return response.json()
 
