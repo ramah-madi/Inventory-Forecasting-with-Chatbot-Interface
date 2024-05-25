@@ -14,7 +14,7 @@ app = FastAPI()
 
 @app.get("/")
 def hello():
-    return {"message": "Hello to forecast API"}
+    return {"message": "Hello to forecast API 👋"}
 
 # Function to handle missing values
 def handle_missing_values(data):
