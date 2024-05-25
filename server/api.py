@@ -16,6 +16,7 @@ app = FastAPI()
 def hello():
     return {"message": "Hello to forecast API"}
 
+# Function to handle missing values
 def handle_missing_values(data):
     # Check if there are any missing values in the data
     if data.isnull().values.any():
@@ -23,6 +24,7 @@ def handle_missing_values(data):
         data = data.fillna(method='ffill')
     return data
 
+# Function to convert target column to numeric format
 def convert_target_to_numeric(data, target_column):
     data[target_column] = pd.to_numeric(data[target_column], errors='coerce')
     data = data.dropna(subset=[target_column])
@@ -31,19 +33,25 @@ def convert_target_to_numeric(data, target_column):
 # Statistical Models
 @app.post("/api/statsForecast/")
 async def forecast(file: UploadFile = File(...), start: str = Form(...), end: str = Form(...), date_column: str = Form(...), target_column: str = Form(...)):
+    # Function to preprocess the data
     def preprocess(data: pd.DataFrame, date_column: str, value_column: str) -> pd.Series:
+        # Handle missing values
         data = handle_missing_values(data)
+        # Convert target column to numeric
         data = convert_target_to_numeric(data, value_column)
+        # Convert date column to datetime and set as index
         data[date_column] = pd.to_datetime(data[date_column])
         data.set_index(date_column, inplace=True)
         series = data[value_column]
         return series
 
+    # Function to fit Auto ARIMA model and generate forecasts
     def model_auto_arima(data: pd.Series, periods: int):
         model = auto_arima(data, seasonal=False, stepwise=True, trace=True)
         forecast = model.predict(n_periods=periods)
         return forecast
 
+    # Function to fit Holt-Winters model and generate forecasts
     def model_holt_winters(data: pd.Series, periods: int):
         lags = 50
         acf_vals = acf(data, fft=True, nlags=lags)
@@ -55,12 +63,16 @@ async def forecast(file: UploadFile = File(...), start: str = Form(...), end: st
         forecast = model_fit.forecast(steps=periods)
         return forecast
     
+    # Read uploaded file content
     contents = await file.read()
+    # Read data as DataFrame
     data = pd.read_csv(BytesIO(contents), delimiter=',')
+    # Preprocess the data
     series = preprocess(data, date_column, target_column)
     train_size = int(len(series) * 0.9)
     train, test = series[:train_size], series[train_size:]
 
+    # Generate forecasts using Auto ARIMA and Holt-Winters models
     arima_forecast_test = model_auto_arima(train, len(test))
     arima_mae_test = mean_absolute_error(test, arima_forecast_test)
     arima_mse_test = mean_squared_error(test, arima_forecast_test)
@@ -75,6 +87,7 @@ async def forecast(file: UploadFile = File(...), start: str = Form(...), end: st
     arima_forecast_future = model_auto_arima(series, future_steps)
     hw_forecast_future = model_holt_winters(series, future_steps)
 
+    # Prepare response
     response = {
         "Test_Accuracy": {
             "Auto_ARIMA": {
@@ -98,11 +111,16 @@ async def forecast(file: UploadFile = File(...), start: str = Form(...), end: st
 @app.post("/api/mlForecast/")
 async def ml_forecast(file: UploadFile = File(...), start: str = Form(...), end: str = Form(...), date_column: str = Form(...), target_column: str = Form(...)):
 
+    # Function to preprocess the data
     def preprocess(data: pd.DataFrame, date_column: str, value_column: str) -> pd.DataFrame:
+        # Handle missing values
         data = handle_missing_values(data)
+        # Convert target column to numeric
         data = convert_target_to_numeric(data, value_column)
+        # Convert date column to datetime and set as index
         data[date_column] = pd.to_datetime(data[date_column])
         data.set_index(date_column, inplace=True)
+        # Extract additional date features
         data['year'] = data.index.year
         data['month'] = data.index.month
         data['day'] = data.index.day
@@ -111,18 +129,22 @@ async def ml_forecast(file: UploadFile = File(...), start: str = Form(...), end:
         data['quarter'] = data.index.quarter
         return data
 
+    # Read uploaded file content
     contents = await file.read()
 
+    # Read data as DataFrame
     if isinstance(contents, str):
         data = pd.read_csv(StringIO(contents), delimiter=',')
     else:
         data = pd.read_csv(BytesIO(contents), delimiter=',')
 
+    # Preprocess the data
     data = preprocess(data, date_column, target_column)
     series = data[target_column]
     train_size = int(len(series) * 0.9)
     train, test = series[:train_size], series[train_size:]
 
+    # Function to create lagged features
     def create_lagged_features(series, lag=1):
         df = pd.DataFrame(series)
         columns = [df.shift(i) for i in range(1, lag + 1)]
@@ -131,18 +153,22 @@ async def ml_forecast(file: UploadFile = File(...), start: str = Form(...), end:
         df.dropna(inplace=True)
         return df
 
+    # Create lagged features for training and testing sets
     lag = 1
     train_lagged = create_lagged_features(train, lag)
     test_lagged = create_lagged_features(test, lag)
 
+    # Split features and target variables
     X_train = train_lagged.iloc[:, :-1].values
     y_train = train_lagged.iloc[:, -1].values
     X_test = test_lagged.iloc[:, :-1].values
     y_test = test_lagged.iloc[:, -1].values
 
+    # Fit Gradient Boosting model
     gb_model = GradientBoostingRegressor()
     gb_model.fit(X_train, y_train)
 
+    # Generate forecasts using Gradient Boosting model
     gb_forecast_test = gb_model.predict(X_test)
     gb_mae_test = mean_absolute_error(y_test, gb_forecast_test)
     gb_mse_test = mean_squared_error(y_test, gb_forecast_test)
@@ -151,12 +177,14 @@ async def ml_forecast(file: UploadFile = File(...), start: str = Form(...), end:
     last_values = X_test[-1].reshape(1, -1)
     gb_forecast_future = []
 
+    # Generate future forecasts using Gradient Boosting model
     for _ in range(forecast_duration):
         next_value = gb_model.predict(last_values)[0]
         gb_forecast_future.append(next_value)
         last_values = np.roll(last_values, -1)
         last_values[0, -1] = next_value
 
+    # Fit MLP Regressor model
     mlp_model = MLPRegressor(
         hidden_layer_sizes=(100,),
         activation='relu',
@@ -170,12 +198,16 @@ async def ml_forecast(file: UploadFile = File(...), start: str = Form(...), end:
         validation_fraction=0.1
     )
     mlp_model.fit(np.arange(len(train)).reshape(-1, 1), train.values)
+
+    # Generate forecasts using MLP Regressor model
     mlp_forecast_test = mlp_model.predict(np.arange(len(train), len(train) + len(test)).reshape(-1, 1))
     mlp_mae_test = mean_absolute_error(test.values, mlp_forecast_test)
     mlp_mse_test = mean_squared_error(test.values, mlp_forecast_test)
 
+    # Generate future forecasts using MLP Regressor model
     mlp_forecast_future = mlp_model.predict(np.arange(len(series), len(series) + forecast_duration).reshape(-1, 1))
 
+    # Prepare response
     response = {
         "Test_Accuracy": {
             "GradientBoosting": {
