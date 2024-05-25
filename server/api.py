@@ -1,4 +1,3 @@
-# Importing the necessary libraries
 from io import BytesIO, StringIO
 import numpy as np
 import pandas as pd
@@ -13,65 +12,55 @@ from statsmodels.tsa.stattools import acf
 
 app = FastAPI()
 
-# welcoming main route for test 
 @app.get("/")
 def hello():
-    return {"messege" : "Hello to forecat api"} 
+    return {"message": "Hello to forecast API"}
+
+def handle_missing_values(data):
+    # Check if there are any missing values in the data
+    if data.isnull().values.any():
+        # Fill missing values using forward fill
+        data = data.fillna(method='ffill')
+    return data
+
+def convert_target_to_numeric(data, target_column):
+    data[target_column] = pd.to_numeric(data[target_column], errors='coerce')
+    data = data.dropna(subset=[target_column])
+    return data
 
 # Statistical Models
 @app.post("/api/statsForecast/")
 async def forecast(file: UploadFile = File(...), start: str = Form(...), end: str = Form(...), date_column: str = Form(...), target_column: str = Form(...)):
     def preprocess(data: pd.DataFrame, date_column: str, value_column: str) -> pd.Series:
-        # Convert the date column to datetime and set it as the index
+        data = handle_missing_values(data)
+        data = convert_target_to_numeric(data, value_column)
         data[date_column] = pd.to_datetime(data[date_column])
         data.set_index(date_column, inplace=True)
-        
-        # Preprocess the data
         series = data[value_column]
         return series
 
     def model_auto_arima(data: pd.Series, periods: int):
-        # Use auto_arima to find the best ARIMA parameters
         model = auto_arima(data, seasonal=False, stepwise=True, trace=True)
-        
-        # Forecast for the specified number of periods
         forecast = model.predict(n_periods=periods)
         return forecast
 
     def model_holt_winters(data: pd.Series, periods: int):
-        # Calculate autocorrelation function
-        lags = 50  # Set the maximum lag to search for seasonal period
+        lags = 50
         acf_vals = acf(data, fft=True, nlags=lags)
-
-        # Find peaks in the ACF
         peaks, _ = find_peaks(acf_vals)
-
-        # Find the first peak (excluding the first lag which is always 1)
         first_peak = peaks[0] if len(peaks) > 0 else None
-
-        # Estimate the seasonal period
         seasonal_period = first_peak if first_peak is not None else np.argmax(acf_vals[1:]) + 1
-
-        # Use the estimated seasonal period in the model
         model = ExponentialSmoothing(data, seasonal='add', seasonal_periods=seasonal_period)
         model_fit = model.fit()
-        
-        # Forecast for the specified number of periods
         forecast = model_fit.forecast(steps=periods)
         return forecast
     
-    # Read the uploaded file content
     contents = await file.read()
     data = pd.read_csv(BytesIO(contents), delimiter=',')
-
-    # Preprocess the data
     series = preprocess(data, date_column, target_column)
-
-    # Split data into train and test sets
     train_size = int(len(series) * 0.9)
     train, test = series[:train_size], series[train_size:]
 
-    # Perform forecasting on the test data to calculate accuracy
     arima_forecast_test = model_auto_arima(train, len(test))
     arima_mae_test = mean_absolute_error(test, arima_forecast_test)
     arima_mse_test = mean_squared_error(test, arima_forecast_test)
@@ -80,15 +69,12 @@ async def forecast(file: UploadFile = File(...), start: str = Form(...), end: st
     hw_mae_test = mean_absolute_error(test, hw_forecast_test)
     hw_mse_test = mean_squared_error(test, hw_forecast_test)
 
-    # Determine the number of steps for future forecasting based on period type
     forecast_duration = (pd.to_datetime(end) - pd.to_datetime(start)).days
     future_steps = forecast_duration
 
-    # Perform future forecasting
     arima_forecast_future = model_auto_arima(series, future_steps)
     hw_forecast_future = model_holt_winters(series, future_steps)
 
-    # Prepare response
     response = {
         "Test_Accuracy": {
             "Auto_ARIMA": {
@@ -112,39 +98,28 @@ async def forecast(file: UploadFile = File(...), start: str = Form(...), end: st
 @app.post("/api/mlForecast/")
 async def ml_forecast(file: UploadFile = File(...), start: str = Form(...), end: str = Form(...), date_column: str = Form(...), target_column: str = Form(...)):
 
-    def preprocess(data: pd.DataFrame, date_column: str, value_column: str) -> pd.Series:
-        # Convert the date column to datetime
+    def preprocess(data: pd.DataFrame, date_column: str, value_column: str) -> pd.DataFrame:
+        data = handle_missing_values(data)
+        data = convert_target_to_numeric(data, value_column)
         data[date_column] = pd.to_datetime(data[date_column])
-        
-        # Set the index to the date column
         data.set_index(date_column, inplace=True)
-        
-        # Extract date features
         data['year'] = data.index.year
         data['month'] = data.index.month
         data['day'] = data.index.day
         data['dayofweek'] = data.index.dayofweek
-        data['weekofyear'] = data.index.isocalendar().week  # Get week number using isocalendar().wee
+        data['weekofyear'] = data.index.isocalendar().week
         data['quarter'] = data.index.quarter
-        
-        # Preprocess the data
-        series = data[value_column]
+        return data
 
-        return series
-
-    # Read the uploaded file content
     contents = await file.read()
 
-    # Check the type of content and use the appropriate IO class
     if isinstance(contents, str):
         data = pd.read_csv(StringIO(contents), delimiter=',')
     else:
         data = pd.read_csv(BytesIO(contents), delimiter=',')
 
-    # Preprocess the data
-    series = preprocess(data, date_column, target_column)
-
-    # Create a time-based split for train and test sets
+    data = preprocess(data, date_column, target_column)
+    series = data[target_column]
     train_size = int(len(series) * 0.9)
     train, test = series[:train_size], series[train_size:]
 
@@ -156,7 +131,7 @@ async def ml_forecast(file: UploadFile = File(...), start: str = Form(...), end:
         df.dropna(inplace=True)
         return df
 
-    lag = 1  # Number of lagged features
+    lag = 1
     train_lagged = create_lagged_features(train, lag)
     test_lagged = create_lagged_features(test, lag)
 
@@ -165,39 +140,42 @@ async def ml_forecast(file: UploadFile = File(...), start: str = Form(...), end:
     X_test = test_lagged.iloc[:, :-1].values
     y_test = test_lagged.iloc[:, -1].values
 
-    # Train GradientBoosting model
     gb_model = GradientBoostingRegressor()
     gb_model.fit(X_train, y_train)
 
-    # Perform forecasting on the test data to calculate accuracy
     gb_forecast_test = gb_model.predict(X_test)
     gb_mae_test = mean_absolute_error(y_test, gb_forecast_test)
     gb_mse_test = mean_squared_error(y_test, gb_forecast_test)
 
-    # Perform future forecasting
     forecast_duration = (pd.to_datetime(end) - pd.to_datetime(start)).days
-    last_values = train[-lag:].values
+    last_values = X_test[-1].reshape(1, -1)
     gb_forecast_future = []
 
     for _ in range(forecast_duration):
-        next_value = gb_model.predict(last_values.reshape(1, -1))[0]
+        next_value = gb_model.predict(last_values)[0]
         gb_forecast_future.append(next_value)
         last_values = np.roll(last_values, -1)
-        last_values[-1] = next_value
+        last_values[0, -1] = next_value
 
-    # Train MLP model
-    mlp_model = MLPRegressor()
+    mlp_model = MLPRegressor(
+        hidden_layer_sizes=(100,),
+        activation='relu',
+        solver='adam',
+        learning_rate='adaptive',
+        learning_rate_init=0.001,
+        max_iter=200,
+        alpha=0.0001,
+        early_stopping=True,
+        n_iter_no_change=10,
+        validation_fraction=0.1
+    )
     mlp_model.fit(np.arange(len(train)).reshape(-1, 1), train.values)
-
-    # Perform forecasting on the test data to calculate accuracy
     mlp_forecast_test = mlp_model.predict(np.arange(len(train), len(train) + len(test)).reshape(-1, 1))
     mlp_mae_test = mean_absolute_error(test.values, mlp_forecast_test)
     mlp_mse_test = mean_squared_error(test.values, mlp_forecast_test)
 
-    # Perform future forecasting for MLP
     mlp_forecast_future = mlp_model.predict(np.arange(len(series), len(series) + forecast_duration).reshape(-1, 1))
 
-    # Prepare response
     response = {
         "Test_Accuracy": {
             "GradientBoosting": {
