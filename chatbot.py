@@ -1,12 +1,14 @@
 import streamlit as st
 import requests
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 from datetime import datetime
 
-#Title
+# Title
 st.title('AI Assistant for future forecasting 🤖')
 
-#Welcoming message
+# Welcoming message
 st.write("Hello, 👋 I am your AI Assistant and I am here to help you with your forecasting problem.")
 
 # Explanation sidebar
@@ -69,7 +71,6 @@ def stats_forecast(data_file, start, end, date_column, target_column):
         'target_column': target_column
     }
     response = requests.post('https://server-api-chatbot-hopy-1b452263.koyeb.app/api/statsForecast/', files=files, data=data)
-
     return response.json()
 
 def type_of_forecast(name, forecast_function):
@@ -112,6 +113,41 @@ def type_of_forecast(name, forecast_function):
                         st.error(f"🤖 Error: The column '{target_column}' does not exist in the dataset.")
                         return
                     
+                    st.write("🤖 Performing Exploratory Data Analysis (EDA) (exploring the data before any preprocessing)...")
+                    
+                    # EDA
+                    st.write("### Data Overview")
+                    st.write("Take a quick glance at the first few rows of your dataset to understand its structure and content.")
+                    st.write(data.head())
+                    
+                    st.write("### Descriptive Statistics")
+                    st.write("This is a summary of the central tendency, dispersion, and shape of the dataset’s distribution, excluding NaN values.")
+                    st.write(data.describe())
+
+                    st.write("### Missing Values")
+                    st.write("Here is the count of missing values in each column to identify if there are any gaps in the data that need to be addressed.")
+                    st.write(data.isnull().sum())
+
+                    st.write("### Data Types")
+                    st.write("Lists the data types of each column to understand what kind of data is being dealt with (e.g., integers, floats, objects).")
+                    st.write(data.dtypes)
+
+                    st.write("### Time-Series Plot")
+                    st.write("Visualizes the time-series data to identify trends, seasonal patterns, and outliers.")
+                    # Ensure the date column is properly converted to datetime format
+                    if not pd.api.types.is_datetime64_any_dtype(data[date_column]):
+                        data[date_column] = pd.to_datetime(data[date_column])
+                    # Sort the data by date to ensure the plot is correct
+                    data = data.sort_values(by=date_column)
+                    plt.figure(figsize=(15, 8))
+                    sns.lineplot(x=date_column, y=target_column, data=data)
+                    plt.xlabel('Date')
+                    plt.ylabel('Demand')
+                    plt.title('Time-Series Plot')
+                    plt.xticks(rotation=45)  # Rotate x-axis labels for better readability
+                    st.pyplot(plt)
+
+
                     if st.button("Confirm"):
                         st.write(f"🤖 Performing {name} Forecast...")
                         try:
@@ -140,7 +176,7 @@ def type_of_forecast(name, forecast_function):
                             for model, forecast in response['Future_Forecast'].items():
                                 st.write(f"- {model}:")
                                 st.line_chart(forecast, use_container_width=True)  # Plot the forecast using Streamlit's line_chart
-                                st.write("X-axis represents Days, Y-axis represents Demand ( the quantity of items will be in demand by the customers)")
+                                st.write("X-axis represents Days, Y-axis represents Demand (the quantity of items will be in demand by the customers)")
                         else:
                             st.error("🤖 Error: Failed to retrieve forecasting results. Please try again.")
 
@@ -161,4 +197,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
